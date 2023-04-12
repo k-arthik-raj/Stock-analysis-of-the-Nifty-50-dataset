@@ -1,0 +1,466 @@
+---
+title: "Jcomp"
+author: "Karthik Raj R | 20BCE1420"
+date: "2023-03-01"
+output: html_document
+---
+
+
+```{r}
+mdata = read.csv('stock_metadata.csv')
+head(mdata)
+```
+
+
+
+```{r}
+library(ggplot2)
+
+ggplot(mdata, aes(x = Industry, fill = Industry)) +
+geom_bar() +
+ggtitle("Which industry has the most number of companies in the NIFTY 50?") +
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5),
+legend.position = "right",
+legend.direction = "vertical",
+legend.key.height = unit(0.3, "cm"),
+legend.key.width = unit(0.5, "cm"))
+```
+
+
+## Visualising Relationships 
+
+### Relationship between volume and highs and lows 
+
+```{r}
+adani <- read.csv("ADANIPORTS.csv")
+adani$Date <- as.Date(adani$Date, format = "%Y-%m-%d")
+min(adani$Date)
+max(adani$Date)
+```
+```{r}
+head(adani)
+```
+
+```{r}
+ggplot(data = adani) + geom_point(mapping = aes(x = Date, y = Volume, color = High))+
+labs(title = "Effect of volume on highs", x = "Date", y = "Volume")
+```
+```{r}
+ggplot(data = adani) + geom_point(mapping = aes(x = Date, y = Volume, color = Low))+
+labs(title = "Effect of volume on lows", x = "Date", y = "Volume")
+```
+
+```{r}
+ggplot(data = adani) + geom_line(mapping = aes( x = Date, y = Close, color = Volume, alpha = Volume ))
+```
+
+
+
+
+```{r}
+library(ggpubr)
+ggqqplot(adani$Volume, ylab = "Volume")
+ggqqplot(adani$High, ylab = "High")
+```
+
+
+```{r}
+res <- cor.test(adani$High, adani$Volume,method = "pearson")
+res
+```
+
+
+
+```{r}
+ggplot(adani, aes(Date)) +
+geom_line(aes(y = High, color = "High", group = 1)) +
+geom_line(aes(y = Close, color = "Close", group = 1)) +
+scale_color_manual(name = "Price", values = c("High" = "red", "Close" = "blue")) +
+labs(title = "High and Close prices of Adani Ports", x = "Date", y = "Price")
+```
+
+
+
+```{r}
+tatasteel <- read.csv("TATASTEEL.csv")
+tatasteel$Date <- as.Date(tatasteel$Date, format = "%Y-%m-%d")
+```
+
+
+```{r}
+ggplot(data = tatasteel) + geom_point(mapping = aes(x = Date, y = Volume, color = High))+
+  labs(title = "Effect of volume on highs", x = "Date", y = "Volume")
+```
+
+```{r}
+ggplot(data = tatasteel) + geom_point(mapping = aes(x = Date, y = Volume, color = Low))+
+  labs(title = "Effect of volume on lows", x = "Date", y = "Volume")
+```
+
+
+```{r}
+ggplot(data = tatasteel) + geom_line(mapping = aes( x = Date, y = Close, color = Volume, alpha = Volume ))
+```
+
+
+```{r}
+ggqqplot(tatasteel$Volume, ylab = "Volume")
+ggqqplot(tatasteel$High, ylab = "High")
+```
+
+```{r}
+res <- cor.test(tatasteel$High, tatasteel$Volume,method = "pearson")
+res
+```
+
+
+
+```{r}
+ggplot(tatasteel, aes(Date)) +
+geom_line(aes(y = Open, color = "Open", group = 1)) +
+geom_line(aes(y = Last, color = "Last", group = 1)) +
+scale_color_manual(name = "Price", values = c("Open" = "blue", "Last" = "green")) +
+labs(title = "Open and Last prices of Tata Steel", x = "Date", y = "Price")
+```
+
+
+ 
+
+### Prediction using XGBoost
+
+
+```{r}
+cutoff_date <- as.Date('2020-06-01')
+train <- adani[adani$Date < cutoff_date,]
+test <- adani[adani$Date >= cutoff_date,]
+
+head(train)
+```
+
+
+
+```{r}
+create_datetime_features <- function(df, date) {
+df$month <- as.integer(format(as.Date(df[, date]), "%m"))
+df$year <- as.integer(format(as.Date(df[, date]), "%Y"))
+df$weekday <- as.integer(format(as.Date(df[, date]), "%w"))
+df$quarter <- as.integer(format(as.Date(df[, date]), "%q"))
+return(df)
+}
+
+train <- create_datetime_features(train, "Date")
+test <- create_datetime_features(test, "Date")
+```
+
+
+```{r}
+head(train)
+```
+
+```{r}
+
+X_train <- train[c("Volume", "Turnover", "Deliverable.Volume", "X.Deliverble", "month", "year", "weekday")]
+y_train <- train$Open
+X_test <- test[c("Volume", "Turnover", "Deliverable.Volume", "X.Deliverble", "month", "year", "weekday")]
+y_test <- test$Open
+
+```
+
+```{r}
+
+library(xgboost)
+
+params <- list(
+  booster = "gbtree",
+  objective = "reg:linear",
+  max_depth = 3,
+  eta = 0.01,
+  nrounds = 1000,
+  early_stopping_rounds = 50)
+
+```
+
+
+```{r}
+
+X_train_mat <- as.matrix(X_train)
+X_test_mat <- as.matrix(X_test)
+```
+
+
+```{r}
+
+train_mat <- xgb.DMatrix(data = X_train_mat, label = y_train)
+test_mat <- xgb.DMatrix(data = X_test_mat, label = y_test)
+watchlist <- list(train = train_mat, test = test_mat)
+model <- xgb.train(
+  params = params,
+  data = train_mat,
+  watchlist = watchlist,
+  nrounds = 1000,
+  verbose = 100
+)
+```
+
+```{r}
+imp <- xgb.importance(model = model)
+print(imp)
+
+imp_df <- data.frame(feature = imp$Feature, importances = imp$Gain)
+print(imp_df$importances)
+```
+
+
+```{r}
+library(ggplot2)
+imp_df[order(imp_df$importances), ]
+
+ggplot(imp_df,aes(x = importances, y = feature)) +
+geom_bar(stat = "identity", fill = "dodgerblue") +
+ggtitle("Feature importances")
+```
+
+
+```{r}
+
+X_test$preds <- predict(model, newdata = xgb.DMatrix(data = X_test_mat))
+#print(X_test$preds)
+mergedf <- data.frame(cbind(X_test,y_test))
+mergedf <- data.frame(cbind(X_test,test$Date))
+head(mergedf)
+```
+
+
+```{r}
+#library(ggplot2)
+#tatasteel$preds <- X_test$preds
+
+ggplot(mergedf, aes(x = test.Date)) +
+geom_line(aes(y = y_test), color = "dodgerblue", size = 1.2) +
+geom_point(aes(y = preds), color = "darkorange", size = 1.5) +
+ggtitle("Predictions Vs Raw data") +
+xlab("Date") +
+ylab("Stock Price") +
+theme_bw()
+```
+
+
+
+```{r}
+# load libraries
+library(tidyverse)
+library(TTR)
+
+# load data
+df <- adani
+
+# calculate moving average
+df$ma <- SMA(df$Close, n = 20)
+
+# calculate standard deviation
+df$sdev <- sd(df$Close, n = 20)
+
+# calculate upper and lower Bollinger Bands
+df$upper_bb <- df$ma + 2*df$sdev
+df$lower_bb <- df$ma - 2*df$sdev
+
+
+
+# plot Bollinger Bands
+ggplot(df, aes(x = Date)) +
+  geom_line(aes(y = Close)) +
+  geom_line(aes(y = ma), color = "blue") +
+  geom_line(aes(y = upper_bb), color = "red") +
+  geom_line(aes(y = lower_bb), color = "red") +
+  labs(title = "Bollinger Bands", x = "Date", y = "Price")
+
+```
+
+
+
+
+## Forecasting
+
+### Forecasting using ARIMA
+
+```{r}
+library(tsbox)
+# library required for forecasting 
+library(forecast)
+library(ggplot2)
+adaniclose <- adani[c('Date','Close')]
+adanits <- ts_ts(ts_long(adaniclose))
+
+year <- 2021
+month <- 3
+train_data <- window(adanits, end = c(year, month))
+test_data <- window(adanits, start = c(year, month + 1))
+
+# Update the end date of train_data to April 2022
+train_data <- window(adanits, end = c(2022, 4))
+
+model <- auto.arima(train_data)
+model$loglik
+model$aic
+
+
+forecast_data_adani <- forecast(model, 12)
+
+head(forecast_data_adani)
+
+autoplot(forecast_data_adani) + 
+  autolayer(test_data, series = "Actual") +
+  xlab("Year") + ylab("Open price") + 
+  ggtitle("ARIMA Forecast for Adani Close price")
+
+```
+
+```{r}
+#write.csv(forecast_data,"C:/Users/rkart/OneDrive/Desktop/Sem-6/Data viz/J comp/Forecasted/arima.csv")
+```
+
+```{r}
+tataopen = tatasteel[c('Date','Close')]
+tataopen
+tatats<-ts_ts(ts_long(tataopen))
+year=2021
+month=3
+train_data <- window(tatats, end = c(year, month))
+test_data <- window(tatats, start = c(year, month+1))
+model<-auto.arima(train_data)
+model$loglik
+model$aic
+
+forecast_data <- forecast(model, 12)
+
+autoplot(forecast_data) + 
+  autolayer(test_data, series = "Actual") +
+  xlab("Year") + ylab("Open price") + 
+  ggtitle("ARIMA Forecast for Tatasteel Open price")
+
+
+```
+
+
+```{r}
+library(prophet)
+
+df <- read.csv("ADANIPORTS.csv")
+new_df <- subset(df, select = c(Date, Close))
+new_df
+
+names(new_df) <- c('ds', 'y')
+
+m <- prophet(new_df)
+future <- make_future_dataframe(m, periods = 365)
+
+# Update the future dataframe to include dates until April 2022
+future <- make_future_dataframe(m, periods = 365 + 30) # Add 30 days for April 2022
+
+forecast <- predict(m, future)
+
+plot(m, forecast)
+
+```
+
+
+
+```{r}
+library(forecast)
+library(lubridate)
+
+data <- adani
+
+data$Date <- as.Date(data$Date, "%Y-%m-%d")
+ts_data <- ts(data$Close, start = c(2008, 1, 1), frequency = 250)
+
+hw_model <- HoltWinters(ts_data)
+print(hw_model)
+preds <- predict(hw_model, n.ahead = 250)
+
+# Update the number of periods to forecast to include April 2022
+n_periods <- 250 + 12  # Add 12 periods for April 2022
+
+#write.csv(ts_data, "C:/Users/rkart/OneDrive/Desktop/Sem-6/Data viz/J comp/Forecasted/hwts.csv")
+#write.csv(preds, "C:/Users/rkart/OneDrive/Desktop/Sem-6/Data viz/J comp/Forecasted/hwpred.csv")
+
+plot(ts_data, main = "Holt-Winters Model", xaxt = "n")
+lines(preds, col = "red")
+legend("topleft", legend = c("Actual", "Predicted"), col = c("black", "red"), lty = 1)
+axis(1, at = seq(2008, 2022, 1), labels = seq(2008, 2022, 1), cex.axis = 0.8)
+
+
+
+ADANIPORTS.NS=read.csv('ADANIPORTS.NS.csv')
+ADANIPORTS.NS$Date <- as.Date(ADANIPORTS.NS$Date, "%Y-%m-%d")
+adani_ts=ts(ADANIPORTS.NS$Close, start = c(2008, 4, 1), frequency = 250)
+
+plot(adani_ts, xaxt = "n", main = "ADANIPORTS Closing Prices using holt-winters", xlab = "Date", ylab = "Price")
+axis(1, at = seq(2008, 2022, 1), labels = seq(2008, 2022, 1), cex.axis = 0.8)
+
+
+
+```
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+
+ADANIPORTS.NS <- read.csv('ADANIPORTS.NS.csv')
+ADANIPORTS.NS$Date <- as.Date(ADANIPORTS.NS$Date, "%Y-%m-%d")
+adani_ts <- ts(ADANIPORTS.NS$Close, start = c(2008, 4, 1), frequency = 250)
+
+# Plot the actual time series data
+plot(adani_ts, xaxt = "n", main = "Holt-winters Forecast for Adani Close price Vs. actual Closing Prices", xlab = "Date", ylab = "Price")
+axis(1, at = seq(2008, 2022, 1), labels = seq(2008, 2022, 1), cex.axis = 0.8)
+
+# Add the predicted values as lines
+lines(ts_data, col = "black") # Assuming 'ts_data' contains the predicted values
+lines(preds, col = "red") # Assuming 'preds' contains the predicted values
+
+# Add a legend
+legend("topleft", legend = c("Actual", "Predicted"), col = c("black", "red"), lty = 1)
+
+```
+
+
+
+```{r}
+
+autoplot(forecast_data_adani) + 
+  autolayer(test_data, series = "forecasted") +
+  autolayer(adani_ts, series = "Actual") +
+  xlab("Year") + ylab("Price") + 
+  ggtitle("ARIMA Forecast for Adani Close price Vs. actual Closing Prices") +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+library(Metrics)
+nrmse_hw=rmse(ADANIPORTS.NS$Open, hwpred$Open)/(max(ADANIPORTS.NS$Open)-min(ADANIPORTS.NS$Open))
+prophet <- read.csv('prophet.csv')
+prophet <- head(prophet,249)
+nrmse_prophet<-rmse(ADANIPORTS.NS$Open, prophet$yhat)/(max(ADANIPORTS.NS$Open)-min(ADANIPORTS.NS$Open))
+rmse_prophet<-rmse(ADANIPORTS.NS$Open, prophet$yhat)
+arimasum<-summary(model)
+rmse_arima <- sqrt(arimasum$sigma^2)
+nrmse_arima<-rmse_arima/(max(ADANIPORTS.NS$Open)-min(ADANIPORTS.NS$Open))
+nrmse_arima
+nrmse_prophet
+nrmse_hw
+```
+
+
+
+
+
+
+
+
+
+
